@@ -1,24 +1,35 @@
 const express = require('express');
 const gravatar = require('gravatar');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const passport = require('passport');
 
 const router = express.Router();
+
+// Load Input validation
+const validateRegisterInput = require('../../validation/register');
+const validateLoginInput = require('../../validation/login');
+
+const keys = require('../../config/keys');
 
 // Load User model
 const User = require('../../models/Users');
 
-// @route GET api/users/test
-// @desc Tests user route
-// @access Public
-router.get('/test', (req, res) => res.json({ msg: 'Users works' }));
-
-// @route GET api/users/register
+// @route POST api/users/register
 // @desc Register new user
 // @access Public
 router.post('/register', (req, res) => {
+  const { errors, isValid } = validateRegisterInput(req.body);
+
+  // Check validation
+  if (!isValid) {
+    return res.status(400).json(errors);
+  }
+
   User.findOne({ email: req.body.email }).then((user) => {
     if (user) {
-      return res.status(400).json({ email: 'Email already exists.' });
+      errors.email = 'Email already exists.';
+      return res.status(400).json(errors);
     }
 
     const avatar = gravatar.url(req.body.email, {
@@ -45,6 +56,64 @@ router.post('/register', (req, res) => {
           .catch((err) => console.log(err));
       });
     });
+  });
+});
+
+// @route POST api/users/login
+// @desc Login User / Returning JWT Token
+// @access Public
+router.post('/login', (req, res) => {
+  const email = req.body.email;
+  const password = req.body.password;
+
+  const { errors, isValid } = validateLoginInput(req.body);
+
+  // Check validation
+  if (!isValid) {
+    return res.status(400).json(errors);
+  }
+
+  // Find user by email
+  User.findOne({ email }).then((user) => {
+    // Check for user
+    if (!user) {
+      errors.email = 'User not found.';
+      return res.status(404).json(errors);
+    }
+
+    // Check password
+    bcrypt.compare(password, user.password).then((isMatch) => {
+      if (isMatch) {
+        // User matched
+        const payload = {
+          id: user.id,
+          name: user.name,
+          avatar: user.avatar,
+          date: user.date,
+        };
+
+        // Sign token
+        jwt.sign(payload, keys.secretOrKey, { expiresIn: '1h' }, (err, token) => {
+          res.json({ success: true, token });
+        });
+      } else {
+        errors.password = 'Password incorrect.';
+        res.status(400).json(errors);
+      }
+    });
+  });
+});
+
+// @route GET api/users/me
+// @desc Return current user
+// @access Private
+router.get('/me', passport.authenticate('jwt', { session: false }), (req, res) => {
+  res.json({
+    id: req.user.id,
+    name: req.user.name,
+    email: req.user.email,
+    avatar: req.user.avatar,
+    date: req.user.date,
   });
 });
 
